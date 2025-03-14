@@ -1,4 +1,5 @@
 from dj_rest_auth.registration.serializers import RegisterSerializer
+from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
 from .models import CustomUser
 
@@ -29,3 +30,14 @@ class CustomRegisterSerializer(RegisterSerializer):
         user.role = self.validated_data.get("role", "student")
         user.save()
         return user
+
+
+
+class CustomUserDetailsSerializer(UserDetailsSerializer):
+    phone_number = serializers.CharField(read_only=True)
+    profile_picture = serializers.ImageField(read_only=True)
+    role = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = CustomUser
+        fields = ("id", "username", "email", "first_name", "last_name", "phone_number", "profile_picture", "role")

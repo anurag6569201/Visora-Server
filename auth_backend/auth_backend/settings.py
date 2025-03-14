@@ -208,6 +208,11 @@ JAZZMIN_SETTINGS = {
 }
 
 AUTH_USER_MODEL = "custom_user.CustomUser"
+
 REST_AUTH_REGISTER_SERIALIZERS = {
-    "REGISTER_SERIALIZER": "custom_user.serializers.CustomRegisterSerializer"
+    "REGISTER_SERIALIZER": "custom_user.serializers.CustomRegisterSerializer",
+}
+
+REST_AUTH_SERIALIZERS = {
+    "USER_DETAILS_SERIALIZER": "custom_user.serializers.CustomUserDetailsSerializer",
 }
