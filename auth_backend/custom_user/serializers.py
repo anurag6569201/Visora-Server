@@ -1,7 +1,7 @@
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
-from .models import CustomUser
+from .models import CustomUser,CustomUserSocielMedia
 
 class CustomRegisterSerializer(RegisterSerializer):
     first_name = serializers.CharField(required=True)
@@ -40,4 +40,11 @@ class CustomUserDetailsSerializer(UserDetailsSerializer):
 
     class Meta:
         model = CustomUser
-        fields = ("id", "username", "email", "first_name", "last_name", "phone_number", "profile_picture", "role")
+        fields = ("id", "username", "email", "first_name", "last_name", "phone_number", "profile_picture", "role", "date_joined")
+
+
+
+class CustomUserSocialMediaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUserSocielMedia
+        fields = '__all__'

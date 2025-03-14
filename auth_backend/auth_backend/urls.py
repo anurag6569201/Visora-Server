@@ -8,6 +8,7 @@ from dj_rest_auth.registration.views import RegisterView
 from dj_rest_auth.views import UserDetailsView
 from custom_user.serializers import CustomRegisterSerializer,CustomUserDetailsSerializer
 
+
 app_name='auth_backend'
 
 router = DefaultRouter()
