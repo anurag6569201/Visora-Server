@@ -16,6 +16,7 @@ router = DefaultRouter()
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include('custom_user.urls'),name='custom_user'),
+    path('',include('visions.urls'),name='visions'),
     path('auth/', include('dj_rest_auth.urls')),
     path('auth/registration/', RegisterView.as_view(serializer_class=CustomRegisterSerializer)),
 ]
