@@ -8,8 +8,8 @@ from dj_rest_auth.models import TokenModel
 from rest_framework.generics import RetrieveUpdateAPIView
 from dj_rest_auth.views import UserDetailsView
 from rest_framework.permissions import IsAuthenticated
-from .serializers import CustomUserDetailsSerializer,CustomUserSocialMediaSerializer
-from .models import CustomUser,CustomUserSocielMedia
+from .serializers import CustomUserDetailsSerializer,CustomUserSocialMediaSerializer,ScoreSerializer
+from .models import CustomUser,CustomUserSocielMedia,Score
 from rest_framework.generics import CreateAPIView
 from django.utils.decorators import method_decorator
 from allauth.account import app_settings as allauth_account_settings
@@ -19,6 +19,8 @@ from allauth.account.utils import complete_signup
 import requests
 from django.conf import settings
 from rest_framework.exceptions import APIException
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework import serializers, viewsets, pagination, filters
 
 def home(request):
     return render(request,'home.html')
@@ -30,7 +32,6 @@ class CustomUserView(RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
-
 
 
 sensitive_post_parameters_m = method_decorator(
@@ -100,6 +101,9 @@ class CustomRegisterView(CreateAPIView):
 
         try:
             response = requests.post(visiora_data_url, json=payload, headers=headers, timeout=5)
+            if user.role in ["Developer", "Animator"]:
+                user_score, created = Score.objects.get_or_create(user_id=user.id)
+
             if response.status_code != 201:
                 raise APIException("Failed to create user in Visiora-Data.")
         except requests.exceptions.RequestException:
@@ -131,3 +135,62 @@ class CustomUserSocialMediaViewSet(viewsets.ViewSet):
         user_social_media = get_object_or_404(CustomUserSocielMedia, user_id=pk)
         serializer = CustomUserSocialMediaSerializer(user_social_media)
         return Response(serializer.data)
+    
+    def update(self, request, pk=None):
+        user_social_media, created = CustomUserSocielMedia.objects.get_or_create(user_id=pk)  # Fetch or create
+        serializer = CustomUserSocialMediaSerializer(user_social_media, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def follow_user(request, user_id):
+    """Follow a user"""
+    user_to_follow = get_object_or_404(CustomUser, id=user_id)
+    request.user.follow(user_to_follow)
+    return Response({"message": f"You are now following {user_to_follow.username}"}, status=status.HTTP_200_OK)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def unfollow_user(request, user_id):
+    """Unfollow a user"""
+    user_to_unfollow = get_object_or_404(CustomUser, id=user_id)
+    request.user.unfollow(user_to_unfollow)
+    return Response({"message": f"You have unfollowed {user_to_unfollow.username}"}, status=status.HTTP_200_OK)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def user_follow_stats(request, user_id):
+    """Get follower and following count"""
+    user = get_object_or_404(CustomUser, id=user_id)
+    data = {
+        "followers": user.follower_count(),
+        "following": user.following_count(),
+    }
+    return Response(data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def UserByIdView(request, user_id):
+    user = get_object_or_404(CustomUser, id=user_id)
+    serializer = CustomUserDetailsSerializer(user)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ScorePagination(pagination.PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+# ViewSet
+class ScoreViewSet(viewsets.ModelViewSet):
+    queryset = Score.objects.all().order_by('-score')
+    serializer_class = ScoreSerializer
+    pagination_class = ScorePagination
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['score', 'updated_at']

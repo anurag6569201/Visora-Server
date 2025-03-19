@@ -1,7 +1,7 @@
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
-from .models import CustomUser,CustomUserSocielMedia
+from .models import CustomUser,CustomUserSocielMedia,Score
 
 class CustomRegisterSerializer(RegisterSerializer):
     first_name = serializers.CharField(required=True)
@@ -17,7 +17,7 @@ class CustomRegisterSerializer(RegisterSerializer):
             "first_name": self.validated_data.get("first_name", ""),
             "last_name": self.validated_data.get("last_name", ""),
             "profile_picture": self.validated_data.get("profile_picture", None),
-            "role": self.validated_data.get("role", "student"),
+            "role": self.validated_data.get("role", "Student"),
         })
         return data
 
@@ -27,7 +27,7 @@ class CustomRegisterSerializer(RegisterSerializer):
         user.last_name = self.validated_data.get("last_name", "")
         user.phone_number = self.validated_data.get("phone_number", "")
         user.profile_picture = self.validated_data.get("profile_picture", None)
-        user.role = self.validated_data.get("role", "student")
+        user.role = self.validated_data.get("role", "Student")
         user.save()
         return user
 
@@ -48,3 +48,28 @@ class CustomUserSocialMediaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUserSocielMedia
         fields = '__all__'
+
+
+
+class CustomUserSerializer(serializers.ModelSerializer):
+    follower_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomUser
+        fields = ["id", "follower_count", "following_count"]
+
+    def get_follower_count(self, obj):
+        return obj.follower_count()
+
+    def get_following_count(self, obj):
+        return obj.following_count()
+    
+
+class ScoreSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username")  # Extract username
+    userid = serializers.IntegerField(source="user.id")  # Extract user ID
+
+    class Meta:
+        model = Score
+        fields = ['id', 'username', 'userid', 'score', 'updated_at']
