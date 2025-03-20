@@ -20,8 +20,10 @@ class AnimationRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
-        """Assign logged-in user as request creator"""
-        serializer.save(created_by=self.request.user)
+        """Assign logged-in user as request creator and return the created object"""
+        animation_request = serializer.save(created_by=self.request.user)
+        print("let see the created animation id ",animation_request.id)
+        return Response(animation_request.id)
 
     def destroy(self, request, *args, **kwargs):
         """Allow only request creators or admins to delete"""
@@ -30,7 +32,7 @@ class AnimationRequestViewSet(viewsets.ModelViewSet):
             self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
-
+    
 class ContributionViewSet(viewsets.ModelViewSet):
     """View to handle developer contributions"""
     serializer_class = ContributionSerializer

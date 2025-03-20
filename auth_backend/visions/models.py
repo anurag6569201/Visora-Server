@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from custom_user.models import CustomUser
+from django.conf import settings
 User = get_user_model()
 
 class AnimationRequest(models.Model):
@@ -13,13 +14,23 @@ class AnimationRequest(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
     category = models.CharField(max_length=100)
-    tags = models.JSONField(default=list)  # Example: ["Physics", "Math", "Electromagnetism"]
-    difficulty = models.CharField(max_length=50, choices=[('Easy', 'Easy'), ('Medium', 'Medium'), ('Hard', 'Hard')])
+    tags = models.JSONField(default=list)  
+    difficulty = models.CharField(
+        max_length=50, 
+        choices=[('Easy', 'Easy'), ('Medium', 'Medium'), ('Hard', 'Hard')]
+    )
     deadline = models.DateField(null=True, blank=True)
+    budget = models.FloatField(null=True, blank=True)  # New field
+    attachments = models.FileField(upload_to='animation_requests/', null=True, blank=True)  # New field
+    visibility = models.BooleanField(default=True)  # Public or Private request
+    views = models.IntegerField(default=0)  # Track number of views
     created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="requests")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open")
+    payment_id = models.CharField(max_length=255, null=True, blank=True)  # New field
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self):
+        return self.title
 
 class Contribution(models.Model):
     animation_request = models.ForeignKey(AnimationRequest, on_delete=models.CASCADE, related_name="contributions")
