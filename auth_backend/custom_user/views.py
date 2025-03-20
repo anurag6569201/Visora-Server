@@ -75,25 +75,16 @@ class CustomRegisterView(CreateAPIView):
         user = self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         data = self.get_response_data(user)
-
-        if data:
-            response = Response(
-                data,
-                status=status.HTTP_201_CREATED,
-                headers=headers,
-            )
-        else:
-            response = Response(status=status.HTTP_204_NO_CONTENT, headers=headers)
-
-        return response
-
-    def perform_create(self, serializer):
-        user = serializer.save(self.request)
-
+        print(user.profile_picture.url)
+        print(user.id)
+        print(user.role)
         visiora_data_url = settings.VISIORA_DATA_API_URL + "/username/"
         payload = {
             "username": user.username,
             "email": user.email,
+            "profile_picture": user.profile_picture.url,
+            "userid": user.id,
+            "role": user.role
         }
         headers = {
             "X-Visiora-Backend-Key": settings.VISIORA_BACKEND_SECRET_KEY
@@ -108,7 +99,19 @@ class CustomRegisterView(CreateAPIView):
                 raise APIException("Failed to create user in Visiora-Data.")
         except requests.exceptions.RequestException:
             raise APIException("Error communicating with Visiora-Data.")
-        
+        if data:
+            response = Response(
+                data,
+                status=status.HTTP_201_CREATED,
+                headers=headers,
+            )
+        else:
+            response = Response(status=status.HTTP_204_NO_CONTENT, headers=headers)
+
+        return response
+
+    def perform_create(self, serializer):
+        user = serializer.save(self.request)
         if allauth_account_settings.EMAIL_VERIFICATION != \
                 allauth_account_settings.EmailVerificationMethod.MANDATORY:
             if api_settings.USE_JWT:

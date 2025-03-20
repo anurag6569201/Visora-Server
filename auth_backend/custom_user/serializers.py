@@ -68,8 +68,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
 class ScoreSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username")  # Extract username
+    userpic = serializers.CharField(source="user.profile_picture")  # Extract username
     userid = serializers.IntegerField(source="user.id")  # Extract user ID
 
     class Meta:
         model = Score
-        fields = ['id', 'username', 'userid', 'score', 'updated_at']
+        fields = ['id', 'username','userpic','userid', 'score', 'updated_at']
