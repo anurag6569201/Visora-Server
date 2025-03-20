@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
-
+from rest_framework import serializers
 from .models import AnimationRequest, Contribution, Engagement, Notification
 from .serializers import (
     UserSerializer, AnimationRequestSerializer, ContributionSerializer, 
@@ -31,17 +31,34 @@ class AnimationRequestViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
 
-
 class ContributionViewSet(viewsets.ModelViewSet):
     """View to handle developer contributions"""
-    queryset = Contribution.objects.all().order_by('-submitted_at')
     serializer_class = ContributionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def perform_create(self, serializer):
-        """Assign logged-in user as contributor"""
-        serializer.save(developer=self.request.user)
+    def get_queryset(self):
+        """Filter contributions based on animation_request ID"""
+        animation_request_id = self.request.query_params.get("request")  # Fetch request ID from query params
+        queryset = Contribution.objects.all().order_by("-submitted_at")
 
+        if animation_request_id:
+            queryset = queryset.filter(animation_request_id=animation_request_id)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        """Ensure one contribution per user per animation request"""
+        animation_request = serializer.validated_data.get("animation_request")
+        developer = self.request.user
+
+        # Check if the user has already contributed to this animation request
+        if Contribution.objects.filter(animation_request=animation_request, developer=developer).exists():
+            raise serializers.ValidationError(
+                {"detail": "You have already submitted a contribution for this request."}
+            )
+
+        # Save the new contribution
+        serializer.save(developer=developer)
 
 
 class EngagementViewSet(viewsets.ModelViewSet):

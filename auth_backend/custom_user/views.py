@@ -170,12 +170,14 @@ def unfollow_user(request, user_id):
 def user_follow_stats(request, user_id):
     """Get follower and following count"""
     user = get_object_or_404(CustomUser, id=user_id)
+    is_following = request.user.following.filter(id=user_id).exists()  # Check if user is following
+
     data = {
         "followers": user.follower_count(),
         "following": user.following_count(),
+        "isFollowing": is_following,  # Include this in response
     }
     return Response(data, status=status.HTTP_200_OK)
-
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -197,3 +199,4 @@ class ScoreViewSet(viewsets.ModelViewSet):
     pagination_class = ScorePagination
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['score', 'updated_at']
+
