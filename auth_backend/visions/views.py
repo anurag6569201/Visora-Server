@@ -62,7 +62,15 @@ class ContributionViewSet(viewsets.ModelViewSet):
         # Save the new contribution
         serializer.save(developer=developer)
 
-
+    @action(detail=True, methods=["patch"], permission_classes=[permissions.IsAuthenticated])
+    def approve(self, request, pk=None):
+        """Approve a contribution"""
+        contribution = self.get_object()
+        contribution.approved = True
+        contribution.save()
+        return Response({"detail": "Contribution approved successfully."}, status=status.HTTP_200_OK)
+    
+    
 class EngagementViewSet(viewsets.ModelViewSet):
     """View to manage likes and comments"""
     queryset = Engagement.objects.all().order_by('-created_at')
