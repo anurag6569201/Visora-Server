@@ -94,6 +94,12 @@ class OpenSourceVisionRequest(models.Model):
     collaboration_link = models.URLField(max_length=300, blank=True, null=True)
     deadline = models.DateField(blank=True, null=True)
     visibility = models.BooleanField(default=True)
+    collaborators = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='collaborating_visions',
+        blank=True  # Users might not collaborate initially
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -112,7 +118,43 @@ class OpenSourceAttachment(models.Model):
 
     def __str__(self):
         return f"Attachment for {self.request.title} ({self.file.name})"
-    
+
+
+# NEW: Collaboration Request Model
+class CollaborationRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    project = models.ForeignKey(
+        OpenSourceVisionRequest,
+        on_delete=models.CASCADE,
+        related_name='collaboration_requests'
+    )
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='collaboration_requests_made'
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True) # Set when owner approves/rejects
+
+    class Meta:
+        # Ensure a user can only request to join a specific project once
+        unique_together = ('project', 'requester')
+        ordering = ['-requested_at']
+
+    def __str__(self):
+        return f"Request from {self.requester.username} for {self.project.title} ({self.status})"
+
+  
 
 class OpenSourceContribution(models.Model):
     contributor = models.ForeignKey(

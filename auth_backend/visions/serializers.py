@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import AnimationRequest, Contribution, Engagement, Notification
 import json
-from .models import OpenSourceVisionRequest, OpenSourceAttachment,OpenSourceContribution
+from .models import OpenSourceVisionRequest, OpenSourceAttachment,OpenSourceContribution,CollaborationRequest
 from decimal import Decimal 
 
 User = get_user_model()
@@ -55,7 +55,10 @@ class LeaderboardSerializer(serializers.Serializer):
 
 
 
-
+class SimpleUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username')
 
 # Basic serializer for showing attachments (e.g., when retrieving a request)
 class OpenSourceAttachmentSerializer(serializers.ModelSerializer):
@@ -85,35 +88,54 @@ class OpenSourceVisionRequestSerializer(serializers.ModelSerializer):
        required=False
     )
 
+    collaborators = SimpleUserSerializer(many=True, read_only=True)
+    current_user_collaboration_status = serializers.SerializerMethodField()
+
     class Meta:
         model = OpenSourceVisionRequest
-        fields = [
-            'id', 'creator', 'title', 'description', 'category', 'difficulty',
-            'funding_goal', 'current_funding', 'collaboration_link', 'deadline', 'tags',
-            'visibility', 'created_at', 'updated_at',
-            'attachments', 
-            'contributions'
-        ]
-        read_only_fields = [
-            'id', 'creator', 'current_funding', 'created_at', 'updated_at',
-            'attachments', 'contributions', 'tags' 
-        ]
+        fields = (
+            'id', 'title', 'description', 'creator',
+            'funding_goal', 'current_funding',
+            'created_at', 'updated_at', 'category', 'difficulty', 'deadline',
+            'visibility', 'collaboration_link',
+            'tags', 'attachments', 'contributions',
+            'collaborators',
+            'current_user_collaboration_status',
+        )
+        read_only_fields = ('creator', 'current_funding',
+                            'created_at', 'updated_at', 'attachments', 'contributions',
+                            'collaborators', 'current_user_collaboration_status') 
 
+    def get_current_user_collaboration_status(self, obj):
+        request = self.context.get('request')
+        user = request.user if request else None
+        if not user or not user.is_authenticated:
+            return 'anonymous' 
 
-    def validate_tags(self, value):
-        """Ensure tags is a list of strings."""
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Tags must be provided as a list.")
-        if not all(isinstance(tag, str) for tag in value):
-            raise serializers.ValidationError("All tags must be strings.")
-        return value
+        if obj.creator == user:
+            return 'owner'
+
+        if obj.collaborators.filter(pk=user.pk).exists():
+            return 'approved' 
+
+        if CollaborationRequest.objects.filter(project=obj, requester=user, status='pending').exists():
+            return 'pending'
+        return 'none'
+    
+    def update(self, instance, validated_data):
+        tags_data = validated_data.pop('tags', None)
+        instance = super().update(instance, validated_data)
+        if tags_data is not None:
+            instance.tags.set(tags_data)
+        return instance
 
     def create(self, validated_data):
-        tags_list = validated_data.pop('tags', [])
+        tags_data = validated_data.pop('tags', [])
+        validated_data['creator'] = self.context['request'].user
         instance = OpenSourceVisionRequest.objects.create(**validated_data)
-        instance.tags = tags_list
-        instance.save()
+        instance.tags.set(tags_data)
         return instance
+
 
 # Separate Serializer specifically for handling the creation input more easily
 class OpenSourceVisionRequestCreateSerializer(serializers.ModelSerializer):
@@ -157,3 +179,35 @@ class OpenSourceContributionCreateSerializer(serializers.Serializer):
         if value <= 0:
             raise serializers.ValidationError("Contribution amount must be positive.")
         return value
+    
+
+
+
+# NEW: Serializer for Collaboration Requests (primarily for owner view)
+class CollaborationRequestSerializer(serializers.ModelSerializer):
+    requester = SimpleUserSerializer(read_only=True)
+    project_title = serializers.CharField(source='project.title', read_only=True)
+
+    class Meta:
+        model = CollaborationRequest
+        fields = ('id', 'project', 'project_title', 'requester', 'status', 'requested_at', 'responded_at')
+        read_only_fields = ('id', 'project', 'project_title', 'requester', 'requested_at', 'responded_at')
+
+
+
+class ManageCollaborationSerializer(serializers.Serializer):
+    ACTION_CHOICES = [
+        ('approve', 'Approve'),
+        ('reject', 'Reject'),
+    ]
+    # Can identify request by ID or requester ID
+    request_id = serializers.IntegerField(required=False)
+    requester_id = serializers.IntegerField(required=False)
+    action = serializers.ChoiceField(choices=ACTION_CHOICES)
+
+    def validate(self, data):
+        if not data.get('request_id') and not data.get('requester_id'):
+            raise serializers.ValidationError("Either 'request_id' or 'requester_id' must be provided.")
+        if data.get('request_id') and data.get('requester_id'):
+             pass 
+        return data

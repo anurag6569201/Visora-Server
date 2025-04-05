@@ -9,13 +9,13 @@ from .serializers import (
     UserSerializer, AnimationRequestSerializer, ContributionSerializer, 
     EngagementSerializer, NotificationSerializer, LeaderboardSerializer
 )
-from .models import OpenSourceVisionRequest, OpenSourceAttachment
+from .models import OpenSourceVisionRequest, OpenSourceAttachment,OpenSourceContribution,CollaborationRequest
 from .serializers import (
     OpenSourceVisionRequestSerializer,
     OpenSourceVisionRequestCreateSerializer 
 )
 User = get_user_model()
-
+from django.views.decorators.csrf import csrf_exempt
 
 class AnimationRequestViewSet(viewsets.ModelViewSet):
     """View to manage animation requests"""
@@ -157,100 +157,165 @@ from django.conf import settings
 from django.db import transaction 
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView 
-from .serializers import OpenSourceContributionCreateSerializer, OpenSourceContributionSerializer 
+from .serializers import OpenSourceContributionCreateSerializer, OpenSourceContributionSerializer,ManageCollaborationSerializer,CollaborationRequestSerializer
 from .models import Contribution 
 from decimal import Decimal # Import Decimal
-
+import logging
+logger = logging.getLogger(__name__) # Setup logging in your settings.py
+from django.utils import timezone
 
 # --- View to handle creating a contribution ---
 class ContributionCreateView(APIView):
     """
-    Handles the creation of a new contribution after successful Razorpay payment.
-    Verifies the payment with Razorpay before saving.
+    Handles the creation of a new contribution for an OpenSourceVisionRequest.
+    Verifies payment with Razorpay before saving.
+    Allows contributions from both authenticated and anonymous users by default.
     """
-    permission_classes = [permissions.IsAuthenticated] # Must be logged in to contribute
+    serializer_class = OpenSourceContributionCreateSerializer
+
+    def get_project(self, pk):
+        """Helper method to get the project or return None."""
+        try:
+            return OpenSourceVisionRequest.objects.get(pk=pk)
+        except OpenSourceVisionRequest.DoesNotExist:
+            return None
 
     def post(self, request, pk):
-        # Find the Open Source Vision Request
-        vision_request = get_object_or_404(OpenSourceVisionRequest, pk=pk)
+        """Handles POST request to create a contribution."""
+        vision_request = self.get_project(pk)
+        if not vision_request:
+            logger.warning(f"Contribution attempt failed: Project with pk={pk} not found.")
+            return Response({"detail": "Project not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Validate input data (amount, payment_id)
-        serializer = OpenSourceContributionCreateSerializer(data=request.data)
+        goal = vision_request.funding_goal or Decimal('0')
+        current = vision_request.current_funding or Decimal('0')
+
+        if goal > 0 and current >= goal:
+            logger.info(f"Contribution attempt rejected: Project pk={pk} already fully funded.")
+            return Response({"detail": "This project has already reached its funding goal."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if goal <= 0:
+             logger.info(f"Contribution attempt rejected: Project pk={pk} has no funding goal set (goal={goal}).")
+             return Response({"detail": "Contributions are not accepted as no funding goal is set for this project."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- Validate Incoming Data ---
+        serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
+            logger.warning(f"Contribution validation failed for request {pk}: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         validated_data = serializer.validated_data
-        amount_contributed = validated_data['amount']
-        razorpay_payment_id = validated_data['payment_id']
+        amount_contributed = validated_data['amount'] 
+        payment_id = validated_data['payment_id']
+        print(amount_contributed,payment_id)
 
-        # --- Check if project is still accepting funding ---
-        if vision_request.current_funding >= vision_request.funding_goal:
+        amount_needed = max(Decimal('0'), goal - current)
+        if amount_contributed > amount_needed:
+            logger.warning(f"Contribution amount {amount_contributed} exceeds needed {amount_needed} for request {pk}")
             return Response(
-                {"detail": "This project has already reached its funding goal."},
+                {"amount": f"Contribution amount (₹{amount_contributed:.2f}) cannot exceed the amount still needed (₹{amount_needed:.2f})."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        # --- Initialize Razorpay client ---
-        try:
-            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-            # --- Verify payment with Razorpay ---
-            payment_info = client.payment.fetch(razorpay_payment_id)
-
-            # Important checks: Status, Amount, Currency
-            if payment_info.get('status') != 'captured':
-                return Response({"detail": "Payment not captured successfully."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Razorpay amount is in paise, convert our amount to paise for comparison
-            amount_in_paise = int(amount_contributed * 100)
-            if payment_info.get('amount') != amount_in_paise:
-                 return Response({"detail": "Payment amount mismatch."}, status=status.HTTP_400_BAD_REQUEST)
-
-            if payment_info.get('currency') != 'INR':
-                 return Response({"detail": "Payment currency mismatch."}, status=status.HTTP_400_BAD_REQUEST)
-
-
-        except razorpay.errors.BadRequestError as e:
-             return Response({"detail": f"Razorpay validation error: Invalid Payment ID?"}, status=status.HTTP_400_BAD_REQUEST)
-        except razorpay.errors.ServerError as e:
-             return Response({"detail": "Error communicating with payment gateway. Please try again later."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception as e:
-            print(f"Unexpected error during Razorpay verification: {e}") # Log this error
-            return Response({"detail": "An unexpected error occurred during payment verification."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            
+        if OpenSourceContribution.objects.filter(razorpay_payment_id=payment_id).exists():
+            logger.warning(f"Attempt to record duplicate contribution for payment_id {payment_id} on request {pk}")
+            return Response({"detail": "This payment has already been successfully recorded as a contribution."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            contributor_user = request.user if request.user.is_authenticated else None
+            contributor_log_name = contributor_user.username if contributor_user else "Anonymous"
+
             with transaction.atomic():
-                request_locked = OpenSourceVisionRequest.objects.select_for_update().get(pk=vision_request.pk)
-
-                if request_locked.current_funding >= request_locked.funding_goal:
-                     return Response(
-                         {"detail": "Funding goal reached while processing. Contribution not applied to this request."},
-                         status=status.HTTP_400_BAD_REQUEST
-                     )
-
-                contribution = Contribution.objects.create(
-                    contributor=request.user,
-                    request=request_locked,
-                    amount=amount_contributed,
-                    razorpay_payment_id=razorpay_payment_id
+                contribution = OpenSourceContribution.objects.create(
+                    contributor=contributor_user, # Can be None
+                    request=vision_request,
+                    amount=amount_contributed, # Use the validated Decimal amount
+                    razorpay_payment_id=payment_id
                 )
 
-                # Update the request's current funding
-                request_locked.current_funding += amount_contributed
+                opersourcevis=OpenSourceVisionRequest.objects.filter(pk=pk).first()
+                opersourcevis.current_funding = opersourcevis.current_funding + amount_contributed
+                opersourcevis.save()
 
-                # Optional: Cap funding at the goal
-                if request_locked.current_funding > request_locked.funding_goal:
-                    request_locked.current_funding = request_locked.funding_goal
-
-                request_locked.save()
-
-            # Return the newly created contribution details
-            response_serializer = ContributionSerializer(contribution)
-            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+                logger.info(f"Contribution {contribution.id} created for request {pk} by user '{contributor_log_name}'. Payment ID: {payment_id}, Amount: {amount_contributed}")
 
         except Exception as e:
-            print(f"Database error during contribution saving: {e}") # Log this error
+            logger.exception(f"Database error during contribution save/update for request {pk}, payment {payment_id}: {e}")
             return Response(
-                {"detail": "Payment successful, but there was an error recording your contribution. Please contact support."},
+                {"detail": "Payment verified, but a server error occurred while recording the contribution. Please contact support with your Payment ID."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+        return Response(
+            {
+                "detail": f"Successfully contributed ₹{amount_contributed:.2f}. Thank you!",
+                "contribution_id": contribution.id 
+            },
+            status=status.HTTP_201_CREATED
+        )
+    
+@csrf_exempt
+def manage_collaboration(self, request, pk=None):
+    """
+    Action for the project owner to approve or reject collaboration requests.
+    Requires IsProjectOwner permission.
+    """
+    project = self.get_object() 
+
+    serializer = ManageCollaborationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    action = serializer.validated_data['action']
+    request_id = serializer.validated_data.get('request_id')
+    requester_id = serializer.validated_data.get('requester_id')
+
+    collab_request = None
+    try:
+        if request_id:
+            collab_request = CollaborationRequest.objects.get(pk=request_id, project=project)
+        elif requester_id:
+            collab_request = CollaborationRequest.objects.get(project=project, requester_id=requester_id)
+        else:
+                return Response({'detail': 'Missing request identifier.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if collab_request.status != 'pending':
+                return Response({'detail': f'This request is already {collab_request.status}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    except CollaborationRequest.DoesNotExist:
+        return Response({'detail': 'Collaboration request not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+    try:
+        with transaction.atomic():
+            requester_user = collab_request.requester
+            if action == 'approve':
+                collab_request.status = 'approved'
+                collab_request.responded_at = timezone.now()
+                collab_request.save(update_fields=['status', 'responded_at'])
+                project.collaborators.add(requester_user)
+
+            elif action == 'reject':
+                collab_request.status = 'rejected'
+                collab_request.responded_at = timezone.now()
+                collab_request.save(update_fields=['status', 'responded_at'])
+                project.collaborators.remove(requester_user)
+
+        return Response({'detail': f'Request {action}d successfully.'}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({'detail': 'An error occurred while managing the request.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@action(detail=True, methods=['get'], url_path='collaboration-requests')
+def list_collaboration_requests(self, request, pk=None):
+    """
+    Action for the project owner to view pending collaboration requests.
+    Requires IsProjectOwner permission.
+    """
+    project = self.get_object() # Permission check via get_permissions
+
+    # Filter for pending requests specifically for this project
+    pending_requests = CollaborationRequest.objects.filter(project=project, status='pending')
+    serializer = CollaborationRequestSerializer(pending_requests, many=True, context={'request': request})
+    return Response(serializer.data)
+
