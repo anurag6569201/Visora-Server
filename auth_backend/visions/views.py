@@ -16,6 +16,8 @@ from .serializers import (
 )
 User = get_user_model()
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 
 class AnimationRequestViewSet(viewsets.ModelViewSet):
     """View to manage animation requests"""
@@ -253,19 +255,17 @@ class ContributionCreateView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
-    
-@csrf_exempt
-def manage_collaboration(self, request, pk=None):
-    """
-    Action for the project owner to approve or reject collaboration requests.
-    Requires IsProjectOwner permission.
-    """
-    project = self.get_object() 
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@csrf_exempt 
+def manage_collaboration(request, pk=None): 
+    project = get_object_or_404(OpenSourceVisionRequest, pk=pk)
 
     serializer = ManageCollaborationSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
-    action = serializer.validated_data['action']
+    action_type = serializer.validated_data['action'] # Renamed from 'action' to avoid clash
     request_id = serializer.validated_data.get('request_id')
     requester_id = serializer.validated_data.get('requester_id')
 
@@ -276,46 +276,259 @@ def manage_collaboration(self, request, pk=None):
         elif requester_id:
             collab_request = CollaborationRequest.objects.get(project=project, requester_id=requester_id)
         else:
-                return Response({'detail': 'Missing request identifier.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'Missing request identifier.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if collab_request.status != 'pending':
-                return Response({'detail': f'This request is already {collab_request.status}.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': f'This request is already {collab_request.status}.'}, status=status.HTTP_400_BAD_REQUEST)
 
     except CollaborationRequest.DoesNotExist:
         return Response({'detail': 'Collaboration request not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-
     try:
         with transaction.atomic():
             requester_user = collab_request.requester
-            if action == 'approve':
+            if action_type == 'approve':
                 collab_request.status = 'approved'
                 collab_request.responded_at = timezone.now()
                 collab_request.save(update_fields=['status', 'responded_at'])
                 project.collaborators.add(requester_user)
-
-            elif action == 'reject':
+            elif action_type == 'reject':
                 collab_request.status = 'rejected'
                 collab_request.responded_at = timezone.now()
                 collab_request.save(update_fields=['status', 'responded_at'])
+                # Optionally remove collaborator if they were somehow added before rejection
                 project.collaborators.remove(requester_user)
 
-        return Response({'detail': f'Request {action}d successfully.'}, status=status.HTTP_200_OK)
+        return Response({'detail': f'Request {action_type}d successfully.'}, status=status.HTTP_200_OK)
 
     except Exception as e:
+        logger.error(f"Error managing collaboration request {collab_request.id if collab_request else 'N/A'} for project {pk}: {e}")
         return Response({'detail': 'An error occurred while managing the request.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@action(detail=True, methods=['get'], url_path='collaboration-requests')
-def list_collaboration_requests(self, request, pk=None):
-    """
-    Action for the project owner to view pending collaboration requests.
-    Requires IsProjectOwner permission.
-    """
-    project = self.get_object() # Permission check via get_permissions
+   
+from django.db import IntegrityError, transaction
+from rest_framework.permissions import IsAuthenticated
 
-    # Filter for pending requests specifically for this project
+@api_view(['POST'])
+@permission_classes([IsAuthenticated]) # User must be logged in to request
+def request_collaboration_view(request, pk=None):
+    """
+    Handles a user's request to collaborate on a specific project.
+    """
+    project = get_object_or_404(OpenSourceVisionRequest, pk=pk)
+    user = request.user
+
+    # --- Pre-checks ---
+    if project.creator == user:
+        return Response({'detail': 'You cannot request to collaborate on your own project.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if project.collaborators.filter(pk=user.pk).exists():
+        return Response({'detail': 'You are already a collaborator on this project.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check if a request already exists (pending or approved)
+    existing_request = CollaborationRequest.objects.filter(project=project, requester=user).first()
+    if existing_request:
+        if existing_request.status == 'pending':
+             return Response({'detail': 'You already have a pending collaboration request for this project.'}, status=status.HTTP_409_CONFLICT) # 409 Conflict is suitable here
+        elif existing_request.status == 'approved':
+             # This case should ideally be caught by the collaborator check above, but good fallback
+             return Response({'detail': 'Your request was already approved.'}, status=status.HTTP_400_BAD_REQUEST)
+        elif existing_request.status == 'rejected':
+            pass
+
+    # --- Create the request ---
+    try:
+        with transaction.atomic():
+            collab_request = CollaborationRequest.objects.create(
+                project=project,
+                requester=user,
+                status='pending' # Default status
+            )
+        logger.info(f"Collaboration request created: User '{user.username}' for project '{project.title}' (ID: {project.id})")
+        # You can serialize the created request if needed in the response
+        return Response({'detail': 'Collaboration request submitted successfully.', 'request_id': collab_request.id}, status=status.HTTP_201_CREATED)
+    except IntegrityError as e:
+         # Catch potential unique_together constraint violation if the check above somehow missed it
+         logger.warning(f"IntegrityError creating collaboration request for user '{user.username}' on project {pk}: {e}")
+         return Response({'detail': 'Could not process request due to a conflict. You might already have a pending request.'}, status=status.HTTP_409_CONFLICT)
+    except Exception as e:
+        logger.exception(f"Error creating collaboration request for user '{user.username}' on project {pk}: {e}")
+        return Response({'detail': 'An unexpected error occurred while submitting your request.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def list_collaboration_requests(self, request, pk=None):
+    project = self.get_object()
+
     pending_requests = CollaborationRequest.objects.filter(project=project, status='pending')
     serializer = CollaborationRequestSerializer(pending_requests, many=True, context={'request': request})
     return Response(serializer.data)
 
+
+
+
+
+from .models import OpenSourceVisionRequest, CollaborativeCode, CodeChangeProposal
+from .serializers import (
+    CollaborativeCodeSerializer,
+    CodeChangeProposalListSerializer,
+    CodeChangeProposalCreateSerializer,
+    CodeChangeProposalDetailSerializer,
+    ManageCodeChangeProposalSerializer
+)
+from visions.permissions import IsProjectCollaboratorOrOwner, IsProposalOwner, IsProjectOwnerForProposal
+
+
+class CollaborativeCodeAPIView(generics.RetrieveAPIView): # Use RetrieveAPIView for GET
+    serializer_class = CollaborativeCodeSerializer
+    permission_classes = [IsAuthenticated, IsProjectCollaboratorOrOwner]
+    lookup_url_kwarg = 'pk' # Project PK from URL
+
+    def get_object(self):
+        """ Gets the CollaborativeCode instance for the project, creating if needed. """
+        project_pk = self.kwargs.get(self.lookup_url_kwarg)
+        project = get_object_or_404(OpenSourceVisionRequest, pk=project_pk)
+        # Check permissions against the project itself first
+        self.check_object_permissions(self.request, project)
+        # Get or create the code instance
+        code_instance, created = CollaborativeCode.objects.get_or_create(project=project)
+        if created:
+            logger.info(f"Created CollaborativeCode for project {project_pk}")
+        return code_instance
+
+
+# --- Views for Code Change Proposals ---
+
+# List (for owner mainly) and Create (for collaborators)
+class CodeChangeProposalListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, IsProjectCollaboratorOrOwner]
+    lookup_url_kwarg = 'pk' # Project PK from URL
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return CodeChangeProposalCreateSerializer
+        return CodeChangeProposalListSerializer
+
+    def get_queryset(self):
+        """ Filter proposals for the specific project from URL. """
+        project_pk = self.kwargs.get(self.lookup_url_kwarg)
+        project = get_object_or_404(OpenSourceVisionRequest, pk=project_pk)
+        # Check user has permission to view proposals for this project
+        self.check_object_permissions(self.request, project)
+
+        # Owner sees all? Collaborators see only their own? Adjust filter as needed.
+        # Example: Owner sees all pending, collaborators see their own pending.
+        user = self.request.user
+        if project.creator == user:
+            # Owner sees all pending proposals for this project
+             return CodeChangeProposal.objects.filter(project=project, status='pending')
+        else:
+            # Collaborator sees only their own pending proposals
+             return CodeChangeProposal.objects.filter(project=project, proposer=user, status='pending')
+            # Alternatively, return all their proposals:
+            # return CodeChangeProposal.objects.filter(project=project, proposer=user)
+
+
+    def perform_create(self, serializer):
+        """ Set proposer, project, and based_on_timestamp automatically. """
+        project_pk = self.kwargs.get(self.lookup_url_kwarg)
+        project = get_object_or_404(OpenSourceVisionRequest, pk=project_pk)
+
+        # Ensure only collaborators (not owner) can create proposals via this view
+        if project.creator == self.request.user:
+             raise serializers.ValidationError("Project owner cannot submit proposals via this endpoint.")
+        # Permission class already checks if user is collaborator or owner, but extra check is fine
+
+        # Get the current timestamp of the main code
+        main_code, _ = CollaborativeCode.objects.get_or_create(project=project)
+
+        serializer.save(
+            proposer=self.request.user,
+            project=project,
+            based_on_timestamp=main_code.last_approved_at # Record what version it's based on
+        )
+        logger.info(f"User {self.request.user.username} created proposal for project {project_pk}")
+
+
+# Retrieve details of a specific proposal
+class CodeChangeProposalDetailView(generics.RetrieveAPIView):
+    serializer_class = CodeChangeProposalDetailSerializer
+    permission_classes = [IsAuthenticated, IsProjectCollaboratorOrOwner] # Owner or Collaborator can view
+    queryset = CodeChangeProposal.objects.select_related('proposer', 'reviewer', 'project').all()
+    lookup_url_kwarg = 'proposal_pk' # Use proposal's PK from URL
+
+    def get_object(self):
+        """ Get the proposal and check permissions against its project. """
+        proposal = super().get_object()
+        # Check permissions based on the *project* linked to the proposal
+        self.check_object_permissions(self.request, proposal.project)
+        return proposal
+
+# Manage (Approve/Reject) a specific proposal (Owner action)
+class ManageCodeChangeProposalView(APIView):
+    permission_classes = [IsAuthenticated, IsProjectOwnerForProposal] # Only project owner
+    serializer_class = ManageCodeChangeProposalSerializer # For input validation
+
+    def get_proposal(self, proposal_pk):
+        """ Helper to get the proposal object. """
+        proposal = get_object_or_404(CodeChangeProposal, pk=proposal_pk)
+        # Check owner has permission for the project linked to this proposal
+        self.check_object_permissions(self.request, proposal) # Checks IsProjectOwnerForProposal
+        return proposal
+
+    def post(self, request, proposal_pk):
+        """ Handle approve or reject actions. """
+        proposal = self.get_proposal(proposal_pk)
+
+        if proposal.status != 'pending':
+            return Response(
+                {"detail": f"This proposal is already '{proposal.status}' and cannot be managed."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = self.serializer_class(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        action = serializer.validated_data['action']
+
+        try:
+            with transaction.atomic():
+                proposal.reviewer = request.user
+                proposal.reviewed_at = timezone.now()
+
+                if action == 'approve':
+                    proposal.status = 'approved' # Or 'merged'
+
+                    # --- Merge the changes into the main CollaborativeCode ---
+                    main_code, _ = CollaborativeCode.objects.select_for_update().get_or_create(project=proposal.project)
+
+                    # --- Conflict Check (Simple: Check if main code changed since proposal) ---
+                    # if proposal.based_on_timestamp and main_code.last_approved_at > proposal.based_on_timestamp:
+                    #     logger.warning(f"Potential conflict approving proposal {proposal.pk}. Main code updated since proposal.")
+                        # Raise error or allow overwrite? For now, allow overwrite ("last merge wins").
+                        # return Response({"detail": "Conflict detected. The main code has been updated since this proposal was submitted."}, status=status.HTTP_409_CONFLICT)
+
+                    main_code.main_html_content = proposal.proposed_html_content
+                    main_code.main_css_content = proposal.proposed_css_content
+                    main_code.main_js_content = proposal.proposed_js_content
+                    main_code.last_approved_by = proposal.proposer
+                    main_code.last_approved_at = proposal.reviewed_at # Match review time
+                    main_code.save()
+                    # --- End Merge ---
+
+                    proposal.save()
+                    logger.info(f"Owner {request.user.username} approved proposal {proposal.pk} by {proposal.proposer.username} for project {proposal.project.pk}")
+
+                elif action == 'reject':
+                    proposal.status = 'rejected'
+                    proposal.save()
+                    logger.info(f"Owner {request.user.username} rejected proposal {proposal.pk} by {proposal.proposer.username} for project {proposal.project.pk}")
+
+                # Return detail of the updated proposal
+                detail_serializer = CodeChangeProposalDetailSerializer(proposal)
+                return Response(detail_serializer.data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+             logger.exception(f"Error managing proposal {proposal.pk}: {e}")
+             return Response({"detail": "An internal server error occurred while managing the proposal."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

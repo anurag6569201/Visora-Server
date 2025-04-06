@@ -2,8 +2,9 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from custom_user.models import CustomUser
 from django.conf import settings
-
+import uuid
 import json
+from django.utils import timezone
 from django.core.serializers.json import DjangoJSONEncoder
 
 User = get_user_model()
@@ -60,7 +61,7 @@ class Notification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
-# Helper function to define upload path per request
+
 def get_opensource_attachment_path(instance, filename):
     return f'vision_attachments/opensource/{instance.request.id}/{filename}'
 
@@ -88,7 +89,7 @@ class OpenSourceVisionRequest(models.Model):
     description = models.TextField()
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
     difficulty = models.CharField(max_length=50, choices=DIFFICULTY_CHOICES)
-    tags = models.JSONField(default=list, encoder=DjangoJSONEncoder, blank=True) # Store tags as a JSON list of strings
+    tags = models.JSONField(default=list, encoder=DjangoJSONEncoder, blank=True)
     funding_goal = models.DecimalField(max_digits=10, decimal_places=2)
     current_funding = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     collaboration_link = models.URLField(max_length=300, blank=True, null=True)
@@ -97,7 +98,7 @@ class OpenSourceVisionRequest(models.Model):
     collaborators = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name='collaborating_visions',
-        blank=True  # Users might not collaborate initially
+        blank=True
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -120,7 +121,6 @@ class OpenSourceAttachment(models.Model):
         return f"Attachment for {self.request.title} ({self.file.name})"
 
 
-# NEW: Collaboration Request Model
 class CollaborationRequest(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -144,28 +144,26 @@ class CollaborationRequest(models.Model):
         default='pending'
     )
     requested_at = models.DateTimeField(auto_now_add=True)
-    responded_at = models.DateTimeField(null=True, blank=True) # Set when owner approves/rejects
+    responded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        # Ensure a user can only request to join a specific project once
         unique_together = ('project', 'requester')
         ordering = ['-requested_at']
 
     def __str__(self):
         return f"Request from {self.requester.username} for {self.project.title} ({self.status})"
 
-  
 
 class OpenSourceContribution(models.Model):
     contributor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL, # Keep contribution record even if user is deleted
+        on_delete=models.SET_NULL,
         null=True,
         related_name='OpenSourceContributions'
     )
     request = models.ForeignKey(
         OpenSourceVisionRequest,
-        on_delete=models.CASCADE, # Delete contribution if request is deleted
+        on_delete=models.CASCADE,
         related_name='OpenSourceContributions'
     )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -180,3 +178,84 @@ class OpenSourceContribution(models.Model):
         ordering = ['-timestamp']
         verbose_name = "Contribution"
         verbose_name_plural = "OpenSourceContributions"
+
+
+
+
+class CollaborativeCode(models.Model):
+    id = models.UUIDField(default=uuid.uuid4, primary_key=True, editable=False)
+    project = models.OneToOneField(
+        OpenSourceVisionRequest,
+        on_delete=models.CASCADE,
+        related_name='collaborative_code'
+    )
+    # Represents the currently approved/merged code
+    main_html_content = models.TextField(blank=True, default="<html>\n<head>\n</head>\n<body>\n  <h1>Welcome</h1>\n</body>\n</html>")
+    main_css_content = models.TextField(blank=True, default="/* Approved CSS styles */")
+    main_js_content = models.TextField(blank=True, default="// Approved JavaScript code")
+
+    # Track who made the last APPROVED change
+    last_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='last_approved_code_changes'
+    )
+    last_approved_at = models.DateTimeField(default=timezone.now) # Track when last merge happened
+
+    def __str__(self):
+        return f"Main Code for '{self.project.title}'"
+
+    class Meta:
+        verbose_name = "Main Collaborative Code"
+        verbose_name_plural = "Main Collaborative Codes"
+
+
+# NEW MODEL: Represents a proposed change by a collaborator
+class CodeChangeProposal(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending Review'),
+        ('approved', 'Approved & Merged'),
+        ('rejected', 'Rejected'),
+    ]
+
+    id = models.UUIDField(default=uuid.uuid4, primary_key=True, editable=False)
+    project = models.ForeignKey(
+        OpenSourceVisionRequest,
+        on_delete=models.CASCADE,
+        related_name='code_proposals'
+    )
+    proposer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE, # If proposer deleted, remove proposal? Or SET_NULL?
+        related_name='code_proposals_made'
+    )
+    # Store the full proposed content
+    proposed_html_content = models.TextField()
+    proposed_css_content = models.TextField()
+    proposed_js_content = models.TextField()
+
+    # Optional: Snapshot of the timestamp of the main code this was based on
+    based_on_timestamp = models.DateTimeField(null=True, blank=True)
+
+    message = models.TextField(blank=True, help_text="Describe the changes made.")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Fields to track review by owner
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='code_proposals_reviewed',
+        limit_choices_to={'is_staff': False} # Assuming owner is not necessarily staff
+    )
+
+    def __str__(self):
+        return f"Proposal by {self.proposer.username} for '{self.project.title}' ({self.status})"
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Code Change Proposal"
+        verbose_name_plural = "Code Change Proposals"

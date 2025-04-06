@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import AnimationRequest, Contribution, Engagement, Notification
-from .models import OpenSourceVisionRequest, OpenSourceAttachment,OpenSourceContribution
+from .models import OpenSourceVisionRequest, OpenSourceAttachment,OpenSourceContribution,CollaborationRequest
 
 
 @admin.register(AnimationRequest)
@@ -84,3 +84,6 @@ class OpenSourceContributionAdmin(admin.ModelAdmin):
     def contributor_username(self, obj):
         return obj.contributor.username if obj.contributor else 'Anonymous'
     contributor_username.short_description = 'Contributor'
+    
+
+admin.site.register(CollaborationRequest)
