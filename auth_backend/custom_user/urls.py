@@ -21,4 +21,5 @@ urlpatterns = [
     path("user/<int:user_id>/stats/", user_follow_stats, name="user_follow_stats"),
 
     path('api/', include(router.urls)),
+    
 ]

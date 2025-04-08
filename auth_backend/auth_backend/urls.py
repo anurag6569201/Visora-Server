@@ -16,6 +16,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('',include('custom_user.urls'),name='custom_user'),
     path('',include('visions.urls'),name='visions'),
+    path('api/wallet/', include('wallet.urls', namespace='wallet')),
     path('auth/', include('dj_rest_auth.urls')),
     path('auth/registration/', CustomRegisterView.as_view(serializer_class=CustomRegisterSerializer)),
 ]

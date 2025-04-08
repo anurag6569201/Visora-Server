@@ -1,6 +1,6 @@
-from rest_framework import viewsets, permissions, status,generics
+from rest_framework import viewsets, permissions, status,generics,serializers
 from rest_framework.response import Response
-from rest_framework.decorators import action
+from rest_framework.decorators import action,api_view, permission_classes
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
@@ -15,8 +15,15 @@ from .serializers import (
     OpenSourceVisionRequestCreateSerializer 
 )
 User = get_user_model()
+
+import logging
+from decimal import Decimal 
+from django.db import transaction 
+from wallet.models import UserWallet
+
+logger = logging.getLogger(__name__)
+
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 
 class AnimationRequestViewSet(viewsets.ModelViewSet):
@@ -46,7 +53,7 @@ class ContributionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter contributions based on animation_request ID"""
-        animation_request_id = self.request.query_params.get("request")  # Fetch request ID from query params
+        animation_request_id = self.request.query_params.get("request")
         queryset = Contribution.objects.all().order_by("-submitted_at")
 
         if animation_request_id:
@@ -59,23 +66,120 @@ class ContributionViewSet(viewsets.ModelViewSet):
         animation_request = serializer.validated_data.get("animation_request")
         developer = self.request.user
 
-        # Check if the user has already contributed to this animation request
         if Contribution.objects.filter(animation_request=animation_request, developer=developer).exists():
             raise serializers.ValidationError(
                 {"detail": "You have already submitted a contribution for this request."}
             )
-
-        # Save the new contribution
         serializer.save(developer=developer)
 
     @action(detail=True, methods=["patch"], permission_classes=[permissions.IsAuthenticated])
     def approve(self, request, pk=None):
-        """Approve a contribution"""
+        """
+        Approve a contribution and add the animation request's budget
+        to the contributor's wallet if applicable and not already paid.
+        Only the creator of the AnimationRequest can approve.
+        """
         contribution = self.get_object()
-        contribution.approved = True
-        contribution.save()
-        return Response({"detail": "Contribution approved successfully."}, status=status.HTTP_200_OK)
-    
+        developer = contribution.developer
+        animation_request = contribution.animation_request
+
+        # --- Permission Check: Only the request creator can approve ---
+        # Make sure the user making the request is the one who created the AnimationRequest
+        if request.user != animation_request.created_by:
+            return Response(
+                {"error": "Only the request creator can approve contributions."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # --- Check if contribution is already approved ---
+        if contribution.approved:
+            return Response(
+                {"detail": "This contribution has already been approved."},
+                status=status.HTTP_400_BAD_REQUEST # Use 400 Bad Request
+            )
+
+        # --- Prepare for budget payment ---
+        budget = animation_request.budget
+        # Check if there's a budget and if the request isn't already completed (implying payment was made)
+        can_pay_budget = (
+            budget is not None and
+            budget > 0 and
+            animation_request.status != 'completed' # Use the status value directly
+        )
+
+        try:
+            # --- Use a database transaction for atomicity ---
+            # Ensures that either all actions succeed or none do.
+            with transaction.atomic():
+                payment_success = False # Flag to track if payment was attempted and succeeded
+                wallet_update_skipped_reason = None # Reason if payment skipped
+
+                # --- Wallet Update Logic (if applicable) ---
+                if can_pay_budget:
+                    try:
+                        # Get the developer's wallet, locking the row for update to prevent race conditions
+                        wallet = UserWallet.objects.select_for_update().get(user=developer)
+
+                        # Add the budget to the withdrawable balance
+                        # Convert budget (potentially float) to Decimal for precision
+                        wallet.withdrawable_balance += Decimal(str(budget))
+                        wallet.save()
+                        payment_success = True
+                        logger.info(f"Successfully added budget {budget} to wallet for user {developer.id} for request {animation_request.id}")
+
+                    except UserWallet.DoesNotExist:
+                        wallet_update_skipped_reason = "Contributor wallet not found."
+                        logger.error(f"UserWallet not found for user {developer.id} during contribution {contribution.id} approval.")
+                        # Option 1: Fail the entire operation (uncomment to enable)
+                        # raise serializers.ValidationError({"error": "Contributor wallet not found. Cannot approve."})
+                        # Option 2: Log error and continue with approval without payment (current behavior)
+
+                    except Exception as e:
+                        logger.error(f"Error updating wallet for user {developer.id} during contribution {contribution.id} approval: {e}", exc_info=True)
+                        # Reraise the exception to trigger transaction rollback
+                        raise serializers.ValidationError({"error": f"Failed to update wallet: {e}"})
+
+                # --- Update Contribution Status ---
+                contribution.approved = True
+                contribution.save()
+
+                # --- Update Animation Request Status (Only if budget was successfully paid) ---
+                if can_pay_budget and payment_success:
+                    animation_request.status = 'completed' # Mark as completed
+                    # Consider setting payment_id if applicable from a payment gateway interaction later
+                    # animation_request.payment_id = 'some_internal_payment_ref'
+                    animation_request.save(update_fields=['status']) # Update only specific fields
+                    logger.info(f"Marked AnimationRequest {animation_request.id} as completed after budget payment.")
+
+
+            # --- Prepare and Send Success Response ---
+            if can_pay_budget:
+                if payment_success:
+                    message = "Contribution approved successfully. Budget added to wallet and request marked as completed."
+                else:
+                    message = f"Contribution approved, but budget could not be added to wallet ({wallet_update_skipped_reason or 'Unknown error'}). Request status not changed to completed."
+            else:
+                if animation_request.status == 'completed':
+                     message = "Contribution approved successfully. Budget was not added as the request is already marked completed."
+                elif not budget or budget <= 0:
+                    message = "Contribution approved successfully. No budget was allocated for this request."
+                else: # Should not happen based on can_pay_budget logic, but for completeness
+                    message = "Contribution approved successfully."
+
+
+            return Response({"detail": message}, status=status.HTTP_200_OK)
+
+        except serializers.ValidationError as e:
+             # Handle validation errors raised explicitly (like wallet update failure)
+             logger.warning(f"Validation error during contribution {contribution.id} approval: {e.detail}")
+             return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            # Catch any other unexpected errors during the transaction
+            logger.error(f"Unexpected error approving contribution {contribution.id}: {e}", exc_info=True)
+            return Response(
+                {"error": "An unexpected error occurred during the approval process."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
 class EngagementViewSet(viewsets.ModelViewSet):
     """View to manage likes and comments"""
