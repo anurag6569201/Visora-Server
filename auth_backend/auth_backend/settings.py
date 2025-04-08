@@ -226,4 +226,3 @@ VISIORA_DATA_API_URL="http://0.0.0.0:8001"
 
 RAZORPAY_KEY_ID='rzp_test_a2IbMRmSXhpEiu'
 RAZORPAY_KEY_SECRET='zfGDDdeReTgVLSWC0TZDErTf'
-RAZORPAYX_ACCOUNT_NUMBER = 'your_razorpayx_account_number'
