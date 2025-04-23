@@ -1,0 +1,181 @@
+/* --- Variables & Basic Setup --- */
+:root {
+    --bg-color: #212529;
+    --terminal-bg: #0d0d0e;
+    --terminal-border: #1a2833;
+    --text-color: #5923c8; /* Primary Neon Accent */
+    --secondary-text: #584089; /* Secondary Accent */
+    --dim-text: #556677;
+    --header-text: #c0c0c0;
+    --font-mono: 'IBM Plex Mono', Consolas, 'Courier New', monospace;
+    --cursor-blink-speed: 0.8s;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-mono);
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+/* --- Background Canvas --- */
+#matrix-background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    opacity: 0.4; /* Keep it subtle */
+}
+
+/* --- Terminal Structure --- */
+.terminal-container {
+    position: relative;
+    z-index: 2;
+    width: 80%;
+    max-width: 900px;
+    background: var(--terminal-bg);
+    border: 1px solid var(--terminal-border);
+    border-radius: 8px;
+    box-shadow: 0 0 50px rgba(195, 0, 255, 0.1), 0 0 15px rgba(0, 0, 0, 0.5) inset;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.terminal-window {
+    padding: 10px 20px 20px 20px;
+}
+
+/* --- Terminal Header --- */
+.terminal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--terminal-border);
+    color: var(--header-text);
+    font-size: 0.8em;
+    user-select: none;
+}
+.header-buttons .dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-left: 6px;
+}
+.dot.red { background-color: #ff5f56; }
+.dot.yellow { background-color: #ffbd2e; }
+.dot.green { background-color: #27c93f; }
+
+/* --- Terminal Body (Output Area) --- */
+.terminal-body {
+    height: 400px; /* Adjust as needed */
+    overflow-y: auto; /* Allow scrolling if boot sequence is long */
+    padding-top: 15px;
+    font-size: 0.95em;
+    line-height: 1.6;
+    white-space: pre-wrap; /* Preserve whitespace and wrap lines */
+    word-break: break-all;
+}
+/* Custom scrollbar (optional) */
+.terminal-body::-webkit-scrollbar { width: 5px; }
+.terminal-body::-webkit-scrollbar-track { background: transparent; }
+.terminal-body::-webkit-scrollbar-thumb { background-color: var(--dim-text); border-radius: 3px;}
+
+/* Styles for different message types in JS */
+.log-info { color: var(--secondary-text); }
+.log-success { color: #27c93f; }
+.log-warning { color: #ffbd2e; }
+.log-error { color: #ff5f56; }
+.log-dim { color: var(--dim-text); }
+
+
+/* --- Prompt & Input --- */
+.terminal-prompt {
+    margin-top: 15px;
+    display: flex;
+    align-items: center;
+}
+.prompt-user {
+    color: var(--secondary-text);
+    font-weight: 600;
+    margin-right: 8px;
+    user-select: none;
+}
+.terminal-input {
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-color);
+    font-family: var(--font-mono);
+    font-size: 1em;
+    flex-grow: 1; /* Take remaining space */
+    caret-color: transparent; /* Hide default caret */
+}
+
+/* --- Custom Cursor --- */
+.cursor {
+    display: inline-block;
+    background-color: var(--text-color);
+    width: 9px; /* Block cursor width */
+    height: 1.2em; /* Match line height */
+    margin-left: 2px;
+    vertical-align: middle;
+    animation: blink var(--cursor-blink-speed) infinite;
+    box-shadow: 0 0 5px var(--text-color);
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* --- Login Link --- */
+.login-link-container {
+    margin-top: 20px;
+    text-align: center; /* Or align with prompt */
+}
+.login-link {
+    color: var(--text-color);
+    text-decoration: none;
+    font-size: 1.1em;
+    font-weight: 600;
+    padding: 8px 15px;
+    border: 1px solid var(--text-color);
+    border-radius: 4px;
+    transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    display: inline-block;
+}
+.login-link:hover {
+    background-color: var(--text-color);
+    color: var(--bg-color);
+    box-shadow: 0 0 15px var(--text-color);
+}
+
+/* --- Terminal Footer --- */
+.terminal-footer {
+    border-top: 1px solid var(--terminal-border);
+    padding: 8px 20px;
+    font-size: 0.75em;
+    color: var(--dim-text);
+    text-align: right;
+    user-select: none;
+}
+#current-time { /* Style for the dynamic time */
+    color: var(--header-text);
+}
+
+/* --- Glitch Effect (Apply sparingly via JS) --- */
+.glitch {
+    animation: glitch-anim 0.3s linear infinite;
+}
+@keyframes glitch-anim {
+  /* Add complex glitch keyframes here */
+}
