@@ -1,11 +1,303 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Visora Data-server</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'assets/css/landing.css' %}">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
 </head>
-<body>
-    hello
+
+<body data-admin-url-prefix="{{ admin_url_prefix }}"> <canvas id="matrix-background"></canvas>
+
+    <div class="terminal-container">
+        <div class="terminal-window">
+            <div class="terminal-header">
+                <span>VISORA MAIN SERVER</span>
+                <div class="header-buttons">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+            </div>
+            <div class="terminal-body" id="terminal-output">
+                </div>
+            <div class="terminal-prompt" id="prompt-line" style="display: none;">
+                <span class="prompt-user">operator@visora-nexus:~$</span>
+                <input type="text" id="terminal-input" class="terminal-input" spellcheck="false" autocomplete="off"
+                    autofocus>
+                <span class="cursor" id="cursor">█</span>
+            </div>
+            <div class="login-link-container" id="login-link-container" style="display: none;">
+                </div>
+        </div>
+        <div class="terminal-footer">
+            <span>Status: Secure Connection Pending | Node: vsr-core-01 | Time: <span id="current-time"></span></span>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Element References ---
+            const terminalOutput = document.getElementById('terminal-output');
+            const promptLine = document.getElementById('prompt-line');
+            const terminalInput = document.getElementById('terminal-input');
+            const loginLinkContainer = document.getElementById('login-link-container');
+            const currentTimeEl = document.getElementById('current-time');
+            const cursor = document.getElementById('cursor');
+            const bodyElement = document.body;
+            const canvas = document.getElementById('matrix-background');
+            const terminalWindow = document.querySelector('.terminal-window');
+
+            // --- Configuration & State ---
+            const adminUrlPrefix = bodyElement.getAttribute('data-admin-url-prefix');
+            let isConfigured = true; // Assume configured unless specific check fails (e.g., prefix needed for OTHER things)
+            let cursorInterval;
+
+            // --- VISORA ASCII ART ---
+            const visoraAsciiArt = `
+██╗   ██╗  ██╗  ███████╗   ██████╗   ██████╗    █████╗
+██║   ██║  ██║  ██╔════╝  ██╔═══██║  ██╔══██╗  ██╔══██╗
+██║   ██║  ██║  ███████╗  ██║   ██║  ██████╔╝  ███████║
+╚██╗ ██╔╝  ██║  ╚════██║  ██║   ██║  ██╔══██╗  ██╔══██║
+ ╚████╔╝   ██║  ███████║  ╚██████╔╝  ██║  ██║  ██║  ██║
+  ╚═══╝    ╚═╝  ╚══════╝   ╚═════╝   ╚═╝  ╚═╝  ╚═╝  ╚═╝
+            `;
+
+            const bootSequence = [
+                { text: 'Initializing VISORA Server v3.1...', delay: 100, style: 'log-dim' },
+            ];
+
+            const finalPromptMessage = `Type <span class="log-success">'login'</span> to authenticate.`;
+            const configErrorMessage = `[<span class="log-error">FATAL</span>] System configuration error. Authentication may be limited.`;
+
+            function scrollToBottom() {
+                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+            }
+
+            function addLine(text, style = null, isHtml = false) {
+                const line = document.createElement('div');
+                if (style) {
+                    line.classList.add(style);
+                }
+                if (isHtml) {
+                    line.innerHTML = text; // Use innerHTML if text contains HTML tags
+                } else {
+                    line.textContent = text; // Use textContent for plain text (safer)
+                }
+                terminalOutput.appendChild(line);
+                scrollToBottom();
+                return line; // Return the created element if needed
+            }
+
+             /** Adds ASCII art */
+             function addAsciiArt(art) {
+                const pre = document.createElement('pre');
+                pre.classList.add('ascii-art');
+                pre.textContent = art;
+                terminalOutput.appendChild(pre);
+                scrollToBottom();
+             }
+
+            /** Updates the clock in the terminal footer */
+            function updateTime() {
+                const now = new Date();
+                const options = {
+                    timeZone: 'Asia/Kolkata',
+                    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+                };
+                try {
+                    currentTimeEl.textContent = now.toLocaleTimeString('en-IN', options) + ' IST';
+                } catch (e) {
+                    currentTimeEl.textContent = now.toLocaleTimeString();
+                    console.warn("Could not format time for IST, using local time.", e);
+                }
+            }
+
+            /** Starts the cursor blinking animation */
+            function startCursorBlinking() {
+                clearInterval(cursorInterval);
+                cursor.style.visibility = 'visible';
+                cursorInterval = setInterval(() => {
+                    cursor.style.visibility = cursor.style.visibility === 'hidden' ? 'visible' : 'hidden';
+                }, 500);
+            }
+
+            /** Stops the cursor blinking animation */
+            function stopCursorBlinking() {
+                clearInterval(cursorInterval);
+                cursor.style.visibility = 'visible';
+            }
+
+             function showPrompt() {
+                 addLine(isConfigured ? finalPromptMessage : configErrorMessage, null, true);
+
+
+                 if (isConfigured) {
+                     promptLine.style.display = 'flex';
+                     terminalInput.focus();
+                     startCursorBlinking();
+                 } else {
+                     promptLine.style.display = 'none';
+                 }
+             }
+
+            function handleCommand(command) {
+                addLine(`<span class="prompt-user">operator@visora-nexus:~$</span> ${command}`, null, true);
+
+                // --- MODIFIED: Specific redirect for 'login' ---
+                if (command === 'login') {
+                    if (isConfigured) { // Still check if system thinks it's okay to proceed
+                        addLine('Authentication requested. Redirecting to secure gateway...', 'log-info');
+                        setTimeout(() => {
+                            window.location.href = '/admin/'; // HARDCODED REDIRECT
+                        }, 800);
+                    } else {
+                        addLine(`[<span class="log-error">ERROR</span>] Cannot process command: System configuration error.`, null, true);
+                        terminalInput.focus(); // Re-focus even on error
+                    }
+                }
+                // --- End Modification ---
+                else if (command === 'help') {
+                    addLine(`Available commands: <span class="log-success">'login'</span>`, 'log-info', true);
+                    terminalInput.focus();
+                } else if (command) {
+                    addLine(`COMMAND NOT RECOGNIZED: ${command}. Type 'help' for available commands.`, 'log-warning');
+                    terminalInput.focus();
+                } else {
+                    terminalInput.focus();
+                }
+            }
+
+            // --- drawMatrix and initBackgroundAnimation (Keep original functions) ---
+            function drawMatrix(ctx, canvas, columns, rainDrops, alphabet, fontSize) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'rgba(89, 35, 200,1)';
+                ctx.font = fontSize + 'px ' + getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim();
+
+                for (let i = 0; i < rainDrops.length; i++) {
+                    const text = alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+                    const x = i * fontSize;
+                    const y = rainDrops[i] * fontSize;
+                    ctx.fillText(text, x, y);
+                    if (y > canvas.height && Math.random() > 0.975) {
+                        rainDrops[i] = 0;
+                    }
+                    rainDrops[i]++;
+                }
+            }
+
+            function initBackgroundAnimation() {
+                if (!canvas) return null;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return null;
+
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+
+                const katakana = 'アァカサタナハマヤャラワガザダバパイィキシチニヒミリヰギジヂビピウゥクスツヌフムユュルグズブヅプエェケセテネヘメレヱゲゼデベペオォコソトノホモヨョロヲゴゾドボポヴッン';
+                const latin = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                const nums = '0123456789';
+                const alphabet = katakana + latin + nums;
+                const fontSize = 16;
+                const columns = Math.floor(canvas.width / fontSize);
+                const rainDrops = Array(columns).fill(1);
+
+                const intervalId = setInterval(() => drawMatrix(ctx, canvas, columns, rainDrops, alphabet, fontSize), 40);
+
+                window.addEventListener('resize', () => {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                    // Consider recalculating columns/raindrops on resize if desired
+                });
+                return intervalId;
+            }
+
+
+            /** Manages the Typed.js boot sequence animation */
+            function typeBootSequence() {
+                let sequenceIndex = 0;
+                let currentTypedInstance = null;
+
+                function typeNextLine() {
+                    if (sequenceIndex < bootSequence.length) {
+                        const item = bootSequence[sequenceIndex];
+                        const lineContainer = document.createElement('div');
+                        if (item.style) lineContainer.classList.add(item.style);
+                        if (item.text.includes('log-success')) lineContainer.classList.add('log-success-line');
+                        if (item.text.includes('log-error')) lineContainer.classList.add('log-error-line');
+
+                        terminalOutput.appendChild(lineContainer);
+                        scrollToBottom();
+
+                        currentTypedInstance = new Typed(lineContainer, {
+                            strings: [item.text],
+                            typeSpeed: 10,
+                            backSpeed: 0,
+                            backDelay: 500,
+                            startDelay: item.delay || 50,
+                            showCursor: false,
+                            contentType: 'html',
+                            onComplete: () => {
+                                scrollToBottom();
+                                sequenceIndex++;
+                                typeNextLine();
+                            },
+                            onDestroy: () => {} // Keep empty or add logging
+                        });
+                    } else {
+                        // Boot sequence finished, show the final prompt
+                        showPrompt();
+                    }
+                }
+                typeNextLine(); // Start the first line
+            }
+
+            console.log("Visora : Initializing...");
+
+
+            initBackgroundAnimation();
+
+            updateTime();
+            setInterval(updateTime, 1000);
+
+            terminalInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && isConfigured) {
+                    e.preventDefault();
+                    const command = terminalInput.value.trim();
+                    terminalInput.value = '';
+                    handleCommand(command);
+                } else if (e.key === 'Enter' && !isConfigured) {
+                    e.preventDefault();
+                    terminalInput.value = '';
+                }
+            });
+
+            terminalWindow.addEventListener('click', () => {
+                if (isConfigured) {
+                    terminalInput.focus();
+                }
+            });
+
+            terminalInput.addEventListener('focus', () => { if (isConfigured) startCursorBlinking(); });
+            terminalInput.addEventListener('blur', stopCursorBlinking);
+
+            addAsciiArt(visoraAsciiArt);
+            setTimeout(() => {
+                typeBootSequence();
+            }, 300); // Adjust delay (milliseconds) as needed
+        }); // End DOMContentLoaded
+    </script>
 </body>
+
 </html>
