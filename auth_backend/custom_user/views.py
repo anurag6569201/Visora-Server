@@ -21,6 +21,8 @@ from django.conf import settings
 from rest_framework.exceptions import APIException
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework import serializers, viewsets, pagination, filters
+from dj_rest_auth.views import LoginView
+from custom_user.serializers import CustomLoginSerializer
 
 def home(request):
     return render(request,'home.html')
@@ -37,6 +39,10 @@ class CustomUserView(RetrieveUpdateAPIView):
 sensitive_post_parameters_m = method_decorator(
     sensitive_post_parameters('password1', 'password2'),
 )
+
+
+class CustomLoginView(LoginView):
+    serializer_class = CustomLoginSerializer
 
 class CustomRegisterView(CreateAPIView):
     """

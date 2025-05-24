@@ -165,7 +165,7 @@ MEDIA_ROOT=os.path.join(BASE_DIR,'media')
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-
+ACCOUNT_LOGIN_METHODS = ['email']
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
@@ -213,6 +213,7 @@ AUTH_USER_MODEL = "custom_user.CustomUser"
 
 REST_AUTH_REGISTER_SERIALIZERS = {
     "REGISTER_SERIALIZER": "custom_user.serializers.CustomRegisterSerializer",
+    'LOGIN_SERIALIZER': 'custom_user.serializers.CustomLoginSerializer',
 }
 
 REST_AUTH_SERIALIZERS = {

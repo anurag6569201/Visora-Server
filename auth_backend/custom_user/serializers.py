@@ -3,6 +3,28 @@ from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
 from .models import CustomUser,CustomUserSocielMedia,Score
 
+from dj_rest_auth.serializers import LoginSerializer
+from rest_framework import serializers
+from django.contrib.auth import authenticate
+
+class CustomLoginSerializer(LoginSerializer):
+    email = serializers.EmailField(required=True)
+
+    def validate(self, attrs):
+        email = attrs.get('email')
+        password = attrs.get('password')
+
+        if email and password:
+            user = authenticate(request=self.context.get('request'), email=email, password=password)
+            if not user:
+                raise serializers.ValidationError("Invalid email or password.")
+        else:
+            raise serializers.ValidationError("Must include 'email' and 'password'.")
+
+        attrs['user'] = user
+        return attrs
+
+
 class CustomRegisterSerializer(RegisterSerializer):
     first_name = serializers.CharField(required=True)
     last_name = serializers.CharField(required=True)
@@ -74,3 +96,5 @@ class ScoreSerializer(serializers.ModelSerializer):
     class Meta:
         model = Score
         fields = ['id', 'username','userpic','userid', 'score', 'updated_at']
+
+
