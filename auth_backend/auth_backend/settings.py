@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 DEBUG = os.getenv('DJANGO_DEBUG')
 
-ALLOWED_HOSTS_STRING = os.getenv("ALLOWED_HOSTS")
+ALLOWED_HOSTS_STRING = os.getenv("ALLOWED_HOSTS","core.visora.cloud","visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app","visora-server.vercel.app","127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
 
 
@@ -206,6 +206,9 @@ RAZORPAY_KEY_SECRET=os.getenv('RAZORPAY_KEY_SECRET')
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "core.visora.cloud",
+    "visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "visora-server.vercel.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -220,6 +223,9 @@ CORS_ALLOW_METHODS = [
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "core.visora.cloud",
+    "visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "visora-server.vercel.app",
 ]
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SECURE = False
