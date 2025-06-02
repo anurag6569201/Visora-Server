@@ -10,7 +10,8 @@ DEBUG = os.getenv('DJANGO_DEBUG')
 
 ALLOWED_HOSTS_STRING = os.getenv("ALLOWED_HOSTS","127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
-
+print(ALLOWED_HOSTS)
+print(ALLOWED_HOSTS_STRING)
 
 INSTALLED_APPS = [
     'jazzmin',
@@ -212,14 +213,14 @@ CORS_ALLOWED_ORIGINS = [
     "https://visora.cloud",
 
     # visora core auths and features api
-    "core.visora.cloud",
-    "visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
-    "visora-server.vercel.app",
+    "https://core.visora.cloud",
+    "https://visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "https://visora-server.vercel.app",
 
     # visora data server api
-    "data.visora.cloud",
-    "visora-data-server-5g7802nh3-anurag-singhs-projects-e7a4e4c9.vercel.app",
-    "visora-data-server.vercel.app",
+    "https://data.visora.cloud",
+    "https://visora-data-server-5g7802nh3-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "https://visora-data-server.vercel.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -240,14 +241,14 @@ CSRF_TRUSTED_ORIGINS = [
     "https://visora.cloud",
 
     # visora core auths and features api
-    "core.visora.cloud",
-    "visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
-    "visora-server.vercel.app",
+    "https://core.visora.cloud",
+    "https://visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "https://visora-server.vercel.app",
 
     # visora data server api
-    "data.visora.cloud",
-    "visora-data-server-5g7802nh3-anurag-singhs-projects-e7a4e4c9.vercel.app",
-    "visora-data-server.vercel.app",
+    "https://data.visora.cloud",
+    "https://visora-data-server-5g7802nh3-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "https://visora-data-server.vercel.app",
 
 ]
 CSRF_COOKIE_HTTPONLY = False
