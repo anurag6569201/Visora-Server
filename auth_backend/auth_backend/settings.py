@@ -8,10 +8,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 DEBUG = os.getenv('DJANGO_DEBUG')
 
-ALLOWED_HOSTS_STRING = os.getenv("ALLOWED_HOSTS","127.0.0.1")
-ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
-print(ALLOWED_HOSTS)
-print(ALLOWED_HOSTS_STRING)
+
+ALLOWED_HOSTS = [ 
+    "127.0.0.1",
+    "core.visora.cloud",
+    "visora-server-mi30bg5tq-anurag-singhs-projects-e7a4e4c9.vercel.app",
+    "visora-server.vercel.app",
+]
 
 INSTALLED_APPS = [
     'jazzmin',
